@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Oryx Check — hybrid claim-checker</title>
+  <meta name="description" content="Paste a claim and get an instant on-device verdict from Gemini Nano, then a full evidence-grounded check from cloud Gemini — every check shown, claim by claim. A hackathon prototype built with Firebase AI Logic.">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "firebase/app": "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js",
+        "firebase/app-check": "https://www.gstatic.com/firebasejs/12.5.0/firebase-app-check.js",
+        "firebase/ai": "https://www.gstatic.com/firebasejs/12.5.0/firebase-ai.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <h1>Oryx Check</h1>
+      <p class="tagline">Every claim checked, every check shown — on-device first, cloud when depth is needed.</p>
+      <p class="prototype-note">
+        Experimental hackathon prototype, built 26–30 Nov 2026 for #BuildHybridAI 2026.
+        The verdicts below are a model's experimental output — they are not an audit,
+        not a certification, and not a statement by Oryx.
+      </p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="status" id="status" aria-live="polite">
+      <p id="firebase-status">Starting…</p>
+      <p id="nano-status">Checking the on-device model…</p>
+    </section>
+
+    <section class="checker">
+      <h2>Check a claim</h2>
+
+      <label for="claim-input">Claim</label>
+      <textarea id="claim-input" rows="4" placeholder="Paste a claim here — for example, a sentence from an AI-generated research summary."></textarea>
+
+      <label for="source-input">Source text to check against <span class="optional">(optional, but the check is only as good as the source)</span></label>
+      <textarea id="source-input" rows="6" placeholder="Paste the source passage the claim cites — the text the claim should be checked against."></textarea>
+
+      <div class="demo">
+        <p class="demo-label">Or try a real claim from Oryx's published audits:</p>
+        <div id="demo-claims" class="demo-claims"></div>
+        <p class="demo-hint" id="demo-hint"></p>
+      </div>
+
+      <button id="check-btn" type="button">Check this claim</button>
+      <p class="progress" id="progress" aria-live="polite"></p>
+    </section>
+
+    <section class="results" id="results" hidden>
+      <h2>Check card</h2>
+      <p class="claim-echo" id="claim-echo"></p>
+      <div class="cards">
+        <article class="card" id="triage-card">
+          <h3><span class="badge badge-device">Checked on-device</span></h3>
+          <div class="card-body" id="triage-body"><p class="muted">Waiting for the on-device triage…</p></div>
+        </article>
+        <article class="card" id="cloud-card">
+          <h3><span class="badge badge-cloud">Checked in the cloud — evidence shown</span></h3>
+          <div class="card-body" id="cloud-body"><p class="muted">Waiting for the cloud evidence check…</p></div>
+        </article>
+      </div>
+      <div class="audit-strip" id="audit-strip" hidden></div>
+      <p class="summary" id="summary" hidden></p>
+      <button id="copy-btn" type="button" hidden>Copy check card as text</button>
+    </section>
+
+    <section class="history">
+      <h2>Recent checks</h2>
+      <ul id="history-list" class="history-list">
+        <li class="muted">No checks yet.</li>
+      </ul>
+    </section>
+
+    <section class="about">
+      <h2>How it works</h2>
+      <ol>
+        <li><strong>On-device triage — Gemini Nano.</strong> The claim gets an instant first-pass verdict in your browser, via Firebase AI Logic. Nothing leaves your device for this step.</li>
+        <li><strong>Cloud evidence check — Gemini 2.5 Flash.</strong> The same claim is checked against the source text you provided. The model must quote the exact passage that supports or contradicts the claim — the evidence is shown, not asserted.</li>
+        <li><strong>Check card.</strong> Both verdicts side by side, the quoted passage, and a plain-English summary. Copy it, or come back to it in the history below.</li>
+      </ol>
+      <p>
+        The verdict taxonomy — Verified, Broken, Unverifiable, Title mismatch — comes from
+        Oryx's published research: the 194-citation audit of AI governance claims
+        (DOI <a href="https://doi.org/10.5281/zenodo.23731235">10.5281/zenodo.23731235</a>)
+        and the 66-citation study
+        (DOI <a href="https://doi.org/10.5281/zenodo.23718472">10.5281/zenodo.23718472</a>).
+        The 10 demo claims are real claims from those audits, with the audit's own verdict
+        shown separately from the model's live verdicts.
+      </p>
+      <p class="fine-print">
+        Built with Firebase AI Logic (Gemini Developer API backend): on-device inference
+        uses the Prompt API in Chrome on Desktop v139+; the cloud check uses Gemini 2.5 Flash.
+        No accounts, no login. Check history is stored anonymously in Firestore (or locally
+        in your browser if Firestore is unavailable) and contains no personal information.
+      </p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>Oryx Check — a #BuildHybridAI 2026 prototype by Oryx Centre for Strategic Futures (oryxai.in).
+      Model verdicts are experimental output. This app is not the Oryx Evidence Audit product.</p>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { initFirebase, getFirebaseStatus } from "./src/firebase.js";
+    import { checkNanoAvailability, triageClaim } from "./src/nano.js";
+    import { verifyClaim } from "./src/verify.js";
+    import { DEMO_CLAIMS } from "./src/corpus.js";
+    import { saveCheck, loadRecentChecks } from "./src/store.js";
+
+    const $ = (id) => document.getElementById(id);
+    const claimInput = $("claim-input");
+    const sourceInput = $("source-input");
+    const checkBtn = $("check-btn");
+    const progressEl = $("progress");
+    const resultsEl = $("results");
+    const triageBody = $("triage-body");
+    const cloudBody = $("cloud-body");
+    const auditStrip = $("audit-strip");
+    const summaryEl = $("summary");
+    const copyBtn = $("copy-btn");
+    const historyList = $("history-list");
+
+    let selectedDemo = null;
+    let lastCheck = null;
+    let nanoState = { available: false, status: "unknown", detail: "" };
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    }
+
+    function verdictClass(v) {
+      return "verdict verdict-" + String(v).toLowerCase().replace(/[^a-z]/g, "-");
+    }
+
+    function verdictHtml(v) {
+      return '<span class="' + verdictClass(v) + '">' + escapeHtml(v) + "</span>";
+    }
+
+    function renderDemoClaims() {
+      const wrap = $("demo-claims");
+      wrap.innerHTML = "";
+      DEMO_CLAIMS.forEach((c) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "demo-chip";
+        b.textContent = c.id.replace("demo-", "#") + " · " + c.auditVerdict;
+        b.title = c.claim;
+        b.addEventListener("click", () => selectDemo(c.id));
+        wrap.appendChild(b);
+      });
+    }
+
+    function selectDemo(id) {
+      const c = DEMO_CLAIMS.find((x) => x.id === id);
+      if (!c) return;
+      selectedDemo = c;
+      claimInput.value = c.claim;
+      sourceInput.value = c.sourceText;
+      $("demo-hint").textContent =
+        "Demo claim " + c.id.replace("demo-", "#") + " loaded — from the " +
+        (c.doi === "10.5281/zenodo.23731235" ? "194-citation audit" : "66-citation study") +
+        " (" + c.source + "). The audit's own verdict for this claim (" + c.auditVerdict +
+        ") will be shown separately from the model's live verdicts.";
+      document.querySelectorAll(".demo-chip").forEach((el) => {
+        el.classList.toggle("selected", el.title === c.claim);
+      });
+    }
+
+    function renderHistory(items) {
+      historyList.innerHTML = "";
+      if (!items.length) {
+        historyList.innerHTML = '<li class="muted">No checks yet.</li>';
+        return;
+      }
+      items.forEach((item) => {
+        const li = document.createElement("li");
+        const cloudV = item.cloud ? item.cloud.verdict : "—";
+        const triageV = item.triage ? item.triage.verdict : "—";
+        li.innerHTML =
+          "<strong>" + escapeHtml((item.claim || "").slice(0, 120)) + "</strong><br>" +
+          '<span class="muted">on-device: ' + escapeHtml(triageV) +
+          " · cloud: " + escapeHtml(cloudV) + "</span>";
+        historyList.appendChild(li);
+      });
+    }
+
+    async function refreshHistory() {
+      try {
+        renderHistory(await loadRecentChecks(10));
+      } catch {
+        renderHistory([]);
+      }
+    }
+
+    function checkCardText(check) {
+      const lines = [
+        "Oryx Check — check card (experimental model output, not an audit)",
+        "",
+        "Claim: " + check.claim,
+        "",
+        "On-device triage (Gemini Nano): " + (check.triage ? check.triage.verdict : "not run") +
+          (check.triage && check.triage.reason ? " — " + check.triage.reason : ""),
+        "",
+        "Cloud evidence check (Gemini 2.5 Flash): " + (check.cloud ? check.cloud.verdict : "not run"),
+      ];
+      if (check.cloud && check.cloud.quote) lines.push('Quoted passage: "' + check.cloud.quote + '"');
+      if (check.cloud && check.cloud.reasoning) lines.push("Reasoning: " + check.cloud.reasoning);
+      if (check.auditVerdict) {
+        lines.push("", "Published audit's verdict for this claim (separate from the model): " + check.auditVerdict);
+      }
+      return lines.join("\n");
+    }
+
+    async function runCheck() {
+      const claim = claimInput.value.trim();
+      const sourceText = sourceInput.value.trim();
+      if (!claim) {
+        progressEl.textContent = "Paste a claim first — or pick one of the demo claims below.";
+        claimInput.focus();
+        return;
+      }
+
+      const fb = getFirebaseStatus();
+      if (!fb.configured) {
+        progressEl.textContent =
+          "Firebase is not configured yet (see src/firebase-config.js). The demo cannot run until the Firebase project values are filled in.";
+        return;
+      }
+
+      checkBtn.disabled = true;
+      resultsEl.hidden = false;
+      auditStrip.hidden = true;
+      summaryEl.hidden = true;
+      copyBtn.hidden = true;
+      triageBody.innerHTML = '<p class="muted">Running on-device triage…</p>';
+      cloudBody.innerHTML = '<p class="muted">Waiting for the cloud evidence check…</p>';
+      $("claim-echo").textContent = "“" + claim + "”";
+      lastCheck = null;
+
+      let triage = null;
+      let cloud = null;
+
+      // Step 1 — on-device triage (only when Nano can run).
+      if (nanoState.available) {
+        progressEl.textContent = "Step 1 of 2 — on-device triage (Gemini Nano)…";
+        try {
+          triage = await triageClaim(claim, sourceText, (p) => {
+            progressEl.textContent =
+              "Step 1 of 2 — on-device model downloading… " + Math.round(p * 100) + "%";
+          });
+          triageBody.innerHTML =
+            verdictHtml(triage.verdict) +
+            '<p class="reason">' + escapeHtml(triage.reason || "") + "</p>" +
+            '<p class="muted">Model confidence: ' + escapeHtml(triage.confidence) + " · computed on this device; nothing left the browser for this step.</p>";
+        } catch (err) {
+          triageBody.innerHTML =
+            '<p class="error">On-device triage failed: ' + escapeHtml(err.message) + "</p>" +
+            '<p class="muted">The cloud check below still works.</p>';
+        }
+      } else {
+        triageBody.innerHTML =
+          '<p class="muted">' + escapeHtml(nanoState.detail) + "</p>" +
+          '<p class="muted">On-device triage skipped — the cloud check below still works.</p>';
+      }
+
+      // Step 2 — cloud evidence check.
+      progressEl.textContent = "Step 2 of 2 — cloud evidence check (Gemini 2.5 Flash)…";
+      try {
+        cloud = await verifyClaim(claim, sourceText);
+        cloudBody.innerHTML =
+          verdictHtml(cloud.verdict) +
+          (cloud.quote
+            ? '<blockquote class="quote">“' + escapeHtml(cloud.quote) + "”</blockquote>"
+            : '<p class="muted">No passage in the provided source text supports or contradicts the claim.</p>') +
+          '<p class="reason">' + escapeHtml(cloud.reasoning || "") + "</p>" +
+          '<p class="muted">Model confidence: ' + escapeHtml(cloud.confidence) + " · checked in the cloud against the source text you provided.</p>";
+      } catch (err) {
+        cloudBody.innerHTML =
+          '<p class="error">Cloud evidence check failed: ' + escapeHtml(err.message) + "</p>";
+      }
+
+      // Audit verdict strip — only for demo claims, kept strictly separate.
+      if (selectedDemo && claim === selectedDemo.claim) {
+        auditStrip.hidden = false;
+        auditStrip.innerHTML =
+          "<strong>Published audit's verdict for this claim:</strong> " +
+          verdictHtml(selectedDemo.auditVerdict) +
+          '<span class="muted"> — from the ' +
+          (selectedDemo.doi === "10.5281/zenodo.23731235" ? "194-citation audit" : "66-citation study") +
+          " (DOI " + escapeHtml(selectedDemo.doi) + "). This is the audit's own verdict, " +
+          "not the model's. The two are shown side by side for comparison, never mixed.</span>";
+      }
+
+      const agree =
+        triage && cloud && triage.verdict === cloud.verdict
+          ? "Both model verdicts agree: " + triage.verdict + "."
+          : triage && cloud
+            ? "The two model verdicts differ (on-device: " + triage.verdict + "; cloud: " + cloud.verdict + "). The cloud check, which quotes its evidence, is the one to trust here."
+            : "One of the two checks did not run — treat the result as incomplete.";
+      summaryEl.hidden = false;
+      summaryEl.textContent = agree;
+
+      lastCheck = {
+        claim,
+        sourceText,
+        triage,
+        cloud,
+        auditVerdict: selectedDemo && claim === selectedDemo.claim ? selectedDemo.auditVerdict : null,
+        demoClaimId: selectedDemo && claim === selectedDemo.claim ? selectedDemo.id : null,
+        createdAt: new Date().toISOString(),
+      };
+      copyBtn.hidden = false;
+      progressEl.textContent = "Done.";
+      checkBtn.disabled = false;
+
+      try {
+        await saveCheck(lastCheck);
+        await refreshHistory();
+      } catch {
+        // History is a nice-to-have; the check card is already shown.
+      }
+    }
+
+    copyBtn.addEventListener("click", async () => {
+      if (!lastCheck) return;
+      try {
+        await navigator.clipboard.writeText(checkCardText(lastCheck));
+        copyBtn.textContent = "Copied.";
+        setTimeout(() => { copyBtn.textContent = "Copy check card as text"; }, 2000);
+      } catch {
+        copyBtn.textContent = "Copy failed — select the text manually.";
+      }
+    });
+
+    checkBtn.addEventListener("click", runCheck);
+    claimInput.addEventListener("input", () => {
+      if (selectedDemo && claimInput.value.trim() !== selectedDemo.claim) {
+        selectedDemo = null;
+        $("demo-hint").textContent = "";
+        document.querySelectorAll(".demo-chip").forEach((el) => el.classList.remove("selected"));
+      }
+    });
+
+    // Boot.
+    (async function boot() {
+      const fb = initFirebase();
+      $("firebase-status").textContent = fb.configured
+        ? "Firebase: connected (" + fb.status + ")."
+        : "Firebase: " + fb.statusDetail;
+      renderDemoClaims();
+      nanoState = await checkNanoAvailability();
+      $("nano-status").textContent = "On-device model: " + nanoState.detail;
+      await refreshHistory();
+    })();
+  </script>
+</body>
+</html>
