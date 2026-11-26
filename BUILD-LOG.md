@@ -148,3 +148,27 @@ the idea; nothing about registration status.
 - The local HTTP server test only proves files serve — it cannot prove
   the Firebase calls work without a project. That is the known gap
   listed under "Not testable yet" above.
+
+## Update — 26 Nov 2026 ~05:30 IST (parent)
+
+- **Firebase project CREATED + CONFIGURED:** "Oryx Check", project ID
+  `oryx-check-hybrid`, free Spark ($0/mo), Analytics off, no billing.
+  AI Logic enabled with the Gemini Developer API backend; App Check
+  ENFORCED for AI Logic. (Two Google 2-step approvals from Amartya:
+  "Yes" then 27, then "Yes" then 24 — 2SV is now on for the account.)
+- **reCAPTCHA Enterprise REGISTERED** as the App Check attestation
+  provider (site key filled into `src/firebase-config.js`; free tier,
+  first 10,000 assessments/month; no billing account). This RESOLVES
+  the open App Check issue in §"Still missing" item 2: judges opening
+  the hosted URL from any browser now pass App Check via reCAPTCHA —
+  no per-browser debug token needed for the demo. `appCheckDebug` is
+  now `false` in the shipped config (debug provider = local dev only).
+  A debug token ("Oryx Check local debug") also exists in the console
+  for local development; its value is NOT in this repo.
+- **Real config filled in:** `src/firebase-config.js` (all six fields)
+  and `.firebaserc` (`oryx-check-hybrid`). No `FILL-IN` values remain
+  in config fields (only historical mentions in comments/docs).
+- **Still missing:** Nano verification on the demo machine; Firebase
+  Hosting deploy + live end-to-end run; demo video; Devpost submit
+  before Tue 1 Dec 2026, 03:30 IST. Firestore enablement to confirm
+  at deploy time (history falls back to localStorage if unavailable).

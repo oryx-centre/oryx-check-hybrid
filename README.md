@@ -41,14 +41,14 @@ output — the app says so on the page.
 |---|---|
 | `index.html` | Single-page app shell + UI wiring (inline module script). |
 | `styles.css` | Plain styles, no framework. |
-| `src/firebase-config.js` | Firebase web config — **PLACEHOLDER values ("FILL-IN") until the Firebase project is created.** |
-| `src/firebase.js` | Firebase init, App Check (debug provider), AI Logic service (`getAI` + `GoogleAIBackend`), Firestore. |
+| `src/firebase-config.js` | Firebase web config — filled from the console 26 Nov 2026 (project oryx-check-hybrid; reCAPTCHA Enterprise site key registered). |
+| `src/firebase.js` | Firebase init, App Check (reCAPTCHA Enterprise provider; debug provider local-dev only), AI Logic service (`getAI` + `GoogleAIBackend`), Firestore. |
 | `src/nano.js` | On-device triage: Nano availability check, `ONLY_ON_DEVICE` model, JSON structured verdict. |
 | `src/verify.js` | Cloud evidence check: `gemini-2.5-flash`, `ONLY_IN_CLOUD`, quote-the-passage prompt, JSON structured verdict. |
 | `src/corpus.js` | 10 demo claims, copied verbatim from the dataset rows named in each entry (`datasetFile` / `datasetRow`). |
 | `src/store.js` | Check history: Firestore first, localStorage fallback. |
 | `firebase.json` | Firebase Hosting config (serves this directory). |
-| `.firebaserc` | Firebase project alias — **"FILL-IN" until the project is created.** |
+| `.firebaserc` | Firebase project alias — `oryx-check-hybrid` (set 26 Nov 2026). |
 | `LICENSE` | Apache-2.0 (the hackathon rules' preferred license). |
 | `BUILD-LOG.md` | What was built, what API surface was verified, what is still missing. |
 
@@ -67,16 +67,18 @@ beyond `firebase deploy`.
    automatically enforces **App Check** for AI Logic.
 3. Enable **Firestore** (production mode is fine — the app writes
    anonymous check records only) and **Hosting**.
-4. Copy the web app's `firebaseConfig` from Project settings and paste
+4. ~~Copy the web app's `firebaseConfig` from Project settings and paste
    the values into `src/firebase-config.js`, replacing every `"FILL-IN"`.
    Also fill in `appCheckSiteKey` (reCAPTCHA Enterprise site key, from
-   the console's App Check section) and the project id in `.firebaserc`.
+   the console's App Check section) and the project id in `.firebaserc`.~~
+   **Done 26 Nov 2026** — config, site key and project id are filled in.
 
-### 2. App Check debug token
+### 2. App Check — reCAPTCHA Enterprise (hosted demo) + debug token (local dev)
 
-The app uses the App Check **debug provider** for local development and
-for the hosted demo (debug tokens are explicitly accepted by the
-hackathon rules).
+The hosted demo uses the registered **reCAPTCHA Enterprise** provider
+(site key in `src/firebase-config.js`, registered 26 Nov 2026, free
+tier), so judges opening the hosted URL from any browser pass App Check.
+The **debug provider** is for local development only:
 
 1. With `appCheckDebug = true` in `src/firebase-config.js`, run the app
    once. The browser console prints a debug token:
@@ -84,10 +86,10 @@ hackathon rules).
 2. In the console, go to **Security > App Check > Apps**, open the web
    app, and select **Manage debug tokens** to register that token.
 
-Note: a debug token is tied to the browser it was generated in. The demo
-machine's token is the one to register before recording the video. If
-judges test the hosted URL from another browser, their App Check token
-will not be registered — this is a known open item (see BUILD-LOG.md).
+Note: a debug token is tied to the browser it was generated in. Never
+commit a debug token value to this repo — `appCheckDebug` is `false` in
+the shipped config, and the debug token created in the console
+("Oryx Check local debug") is for local development only.
 
 ### 3. Chrome setup for Gemini Nano (demo machine)
 
@@ -116,7 +118,7 @@ needs the Chrome flag and the downloaded model (see §3 above).
 
 ```bash
 firebase login
-firebase use --add        # pick the Firebase project (replaces "FILL-IN" in .firebaserc)
+firebase use oryx-check-hybrid  # project already set in .firebaserc
 firebase deploy --only hosting
 ```
 
@@ -139,8 +141,10 @@ The public Hosting URL is the project URL for the Devpost submission.
 - [ ] A pasted claim with source text: cloud card quotes an exact
       passage from the provided text.
 - [ ] Copy button copies the check card as text.
-- [ ] Secrets sweep: `grep -ri "apiKey" src/` shows only `"FILL-IN"`;
-      no service-account key, no server key, no PII anywhere in the repo.
+- [ ] Secrets sweep: `grep -ri "apiKey" src/` shows only the public web
+      config (the Firebase web apiKey is public-by-design client config);
+      no service-account key, no server key, no debug token value, no PII
+      anywhere in the repo.
 
 ## Claim rules (hard — do not break these)
 
